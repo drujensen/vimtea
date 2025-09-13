@@ -82,6 +82,7 @@ type editorModel struct {
 	yankBuffer     string  // Clipboard
 	lastOp         string  // Last operation performed (for repeating with .)
 	fullScreen     bool    // Whether to use the full terminal screen
+	readOnly       bool    // Whether the editor is read-only
 	initialContent string  // Initial content used to create the editor
 
 	mode              EditorMode // Current mode
@@ -139,6 +140,7 @@ type options struct {
 	FileName               string         // Filename for syntax highlighting
 	RelativeNumbers        bool           // Whether to show relative line numbers
 	FullScreen             bool           // Whether to use the full terminal screen
+	ReadOnly               bool           // Whether the editor is read-only
 }
 
 // EditorOption is a function that modifies the editor options
@@ -162,6 +164,7 @@ func NewEditor(opts ...EditorOption) Editor {
 		FileName:               "",
 		RelativeNumbers:        false,
 		FullScreen:             false,
+		ReadOnly:               false,
 	}
 
 	// Apply all options
@@ -175,6 +178,7 @@ func NewEditor(opts ...EditorOption) Editor {
 		buffer:                 newBuffer(options.Content),
 		mode:                   ModeNormal,
 		fullScreen:             options.FullScreen,
+		readOnly:               options.ReadOnly,
 		enableCommandMode:      options.EnableCommandMode,
 		enableStatusBar:        options.EnableStatusBar,
 		cursor:                 newCursor(0, 0),
@@ -237,9 +241,7 @@ func (m *editorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		m.lastBlinkTime = time.Now()
 		return m.handleKeypress(msg)
 	case tea.WindowSizeMsg:
-		if m.fullScreen {
-			return m.SetSize(msg.Width, msg.Height)
-		}
+		return m.SetSize(msg.Width, msg.Height)
 
 	case cursorBlinkMsg:
 		// Handle cursor blinking animation
@@ -340,15 +342,17 @@ func (m *editorModel) handleKeypress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		return m.handlePrefixKeypress(ModeNormal)(msg)
 
 	case ModeInsert:
-		// Check for registered keybindings first
-		if binding := m.registry.FindExact(msg.String(), ModeInsert); binding != nil {
-			cmd := binding.Command(m)
-			m.ensureCursorVisible()
-			return m, cmd
-		} else {
-			// Insert regular characters
-			if len(msg.String()) == 1 {
-				return insertCharacter(m, msg.String())
+		if !m.readOnly {
+			// Check for registered keybindings first
+			if binding := m.registry.FindExact(msg.String(), ModeInsert); binding != nil {
+				cmd := binding.Command(m)
+				m.ensureCursorVisible()
+				return m, cmd
+			} else {
+				// Insert regular characters
+				if len(msg.String()) == 1 {
+					return insertCharacter(m, msg.String())
+				}
 			}
 		}
 
@@ -698,5 +702,11 @@ func WithRelativeNumbers(enable bool) EditorOption {
 func WithFullScreen() EditorOption {
 	return func(o *options) {
 		o.FullScreen = true
+	}
+}
+
+func WithReadOnly(readOnly bool) EditorOption {
+	return func(o *options) {
+		o.ReadOnly = readOnly
 	}
 }

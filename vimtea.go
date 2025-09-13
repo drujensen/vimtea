@@ -27,6 +27,7 @@ Or customize it with options:
 		vimtea.WithEnableStatusBar(true),
 		vimtea.WithDefaultSyntaxTheme("catppuccin-macchiato"),
 		vimtea.WithRelativeNumbers(true),
+		vimtea.WithReadOnly(true),
 	)
 
 Use it in a Bubble Tea application:

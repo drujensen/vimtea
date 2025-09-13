@@ -56,31 +56,38 @@ func switchMode(model *editorModel, newMode EditorMode) tea.Cmd {
 }
 
 func registerBindings(m *editorModel) {
-	m.registry.Add("i", enterModeInsert, ModeNormal, "Enter insert mode")
+	// Navigation and visual mode bindings (always available)
 	m.registry.Add("v", beginVisualSelection, ModeNormal, "Enter visual mode")
 	m.registry.Add("V", beginVisualLineSelection, ModeNormal, "Enter visual line mode")
-	m.registry.Add("x", deleteCharAtCursor, ModeNormal, "Delete character at cursor")
 	if m.enableCommandMode {
 		m.registry.Add(":", enterModeCommand, ModeNormal, "Enter command mode")
 	}
 
-	m.registry.Add("a", appendAfterCursor, ModeNormal, "Append after cursor")
-	m.registry.Add("A", appendAtEndOfLine, ModeNormal, "Append at end of line")
-	m.registry.Add("I", insertAtStartOfLine, ModeNormal, "Insert at start of line")
-	m.registry.Add("o", openLineBelow, ModeNormal, "Open line below")
-	m.registry.Add("O", openLineAbove, ModeNormal, "Open line above")
+	// Editing bindings (only if not read-only)
+	if !m.readOnly {
+		m.registry.Add("i", enterModeInsert, ModeNormal, "Enter insert mode")
+		m.registry.Add("x", deleteCharAtCursor, ModeNormal, "Delete character at cursor")
 
+		m.registry.Add("a", appendAfterCursor, ModeNormal, "Append after cursor")
+		m.registry.Add("A", appendAtEndOfLine, ModeNormal, "Append at end of line")
+		m.registry.Add("I", insertAtStartOfLine, ModeNormal, "Insert at start of line")
+		m.registry.Add("o", openLineBelow, ModeNormal, "Open line below")
+		m.registry.Add("O", openLineAbove, ModeNormal, "Open line above")
+
+		m.registry.Add("dd", deleteLine, ModeNormal, "Delete line")
+		m.registry.Add("D", deleteToEndOfLine, ModeNormal, "Delete to end of line")
+		m.registry.Add("p", pasteAfter, ModeNormal, "Paste after cursor")
+		m.registry.Add("P", pasteBefore, ModeNormal, "Paste before cursor")
+
+		m.registry.Add("u", undo, ModeNormal, "Undo")
+		m.registry.Add("ctrl+r", redo, ModeNormal, "Redo")
+		m.registry.Add("diw", deleteInnerWord, ModeNormal, "Delete inner word")
+		m.registry.Add("ciw", changeInnerWord, ModeNormal, "Change inner word")
+	}
+
+	// Yank operations (always available for copying)
 	m.registry.Add("yy", yankLine, ModeNormal, "Yank line")
-	m.registry.Add("dd", deleteLine, ModeNormal, "Delete line")
-	m.registry.Add("D", deleteToEndOfLine, ModeNormal, "Delete to end of line")
-	m.registry.Add("p", pasteAfter, ModeNormal, "Paste after cursor")
-	m.registry.Add("P", pasteBefore, ModeNormal, "Paste before cursor")
-
-	m.registry.Add("u", undo, ModeNormal, "Undo")
-	m.registry.Add("ctrl+r", redo, ModeNormal, "Redo")
-	m.registry.Add("diw", deleteInnerWord, ModeNormal, "Delete inner word")
 	m.registry.Add("yiw", yankInnerWord, ModeNormal, "Yank inner word")
-	m.registry.Add("ciw", changeInnerWord, ModeNormal, "Change inner word")
 
 	for _, mode := range []EditorMode{ModeNormal, ModeVisual} {
 		m.registry.Add("h", moveCursorLeft, mode, "Move cursor left")
@@ -108,18 +115,25 @@ func registerBindings(m *editorModel) {
 	m.registry.Add("V", exitModeVisual, ModeVisual, "Exit visual mode")
 	m.registry.Add(":", enterModeCommand, ModeVisual, "Enter command mode")
 	m.registry.Add("y", yankVisualSelection, ModeVisual, "Yank selection")
-	m.registry.Add("d", deleteVisualSelection, ModeVisual, "Delete selection")
-	m.registry.Add("x", deleteVisualSelection, ModeVisual, "Delete selection")
-	m.registry.Add("p", replaceVisualSelectionWithYank, ModeVisual, "Replace with yanked text")
 
-	m.registry.Add("esc", exitModeInsert, ModeInsert, "Exit insert mode")
-	m.registry.Add("backspace", handleInsertBackspace, ModeInsert, "Backspace")
-	m.registry.Add("tab", handleInsertTab, ModeInsert, "Tab")
-	m.registry.Add("enter", handleInsertEnterKey, ModeInsert, "Enter")
-	m.registry.Add("up", handleArrowKeys("up"), ModeInsert, "Move cursor up")
-	m.registry.Add("down", handleArrowKeys("down"), ModeInsert, "Move cursor down")
-	m.registry.Add("left", handleArrowKeys("left"), ModeInsert, "Move cursor left")
-	m.registry.Add("right", handleArrowKeys("right"), ModeInsert, "Move cursor right")
+	// Editing bindings in visual mode (only if not read-only)
+	if !m.readOnly {
+		m.registry.Add("d", deleteVisualSelection, ModeVisual, "Delete selection")
+		m.registry.Add("x", deleteVisualSelection, ModeVisual, "Delete selection")
+		m.registry.Add("p", replaceVisualSelectionWithYank, ModeVisual, "Replace with yanked text")
+	}
+
+	// Insert mode bindings (only if not read-only)
+	if !m.readOnly {
+		m.registry.Add("esc", exitModeInsert, ModeInsert, "Exit insert mode")
+		m.registry.Add("backspace", handleInsertBackspace, ModeInsert, "Backspace")
+		m.registry.Add("tab", handleInsertTab, ModeInsert, "Tab")
+		m.registry.Add("enter", handleInsertEnterKey, ModeInsert, "Enter")
+		m.registry.Add("up", handleArrowKeys("up"), ModeInsert, "Move cursor up")
+		m.registry.Add("down", handleArrowKeys("down"), ModeInsert, "Move cursor down")
+		m.registry.Add("left", handleArrowKeys("left"), ModeInsert, "Move cursor left")
+		m.registry.Add("right", handleArrowKeys("right"), ModeInsert, "Move cursor right")
+	}
 
 	m.registry.Add("esc", exitModeCommand, ModeCommand, "Exit command mode")
 	m.registry.Add("enter", executeCommand, ModeCommand, "Execute command")

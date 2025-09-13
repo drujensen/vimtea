@@ -6,6 +6,7 @@ import (
 	tea "github.com/charmbracelet/bubbletea"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"golang.design/x/clipboard"
 )
 
 func TestCommandExecution(t *testing.T) {
@@ -33,11 +34,17 @@ func TestCommandExecution(t *testing.T) {
 }
 
 func TestPasteCommands(t *testing.T) {
+	err := clipboard.Init()
+	if err != nil {
+		t.Skip("Clipboard not available, skipping test")
+	}
+
 	editor := NewEditor(WithContent("Line 1\nLine 2\nLine 3"))
 	model := editor.(*editorModel)
 
 	// Set up yankBuffer
 	model.yankBuffer = "Yanked content"
+	clipboard.Write(clipboard.FmtText, []byte("Yanked content"))
 
 	// Test paste after command
 	pasteAfterBinding := model.registry.FindExact("p", ModeNormal)
@@ -65,6 +72,7 @@ func TestPasteCommands(t *testing.T) {
 	// Reset buffer
 	model.buffer.lines = []string{"Line 1", "Line 2", "Line 3"}
 	model.yankBuffer = "\nYanked line"
+	clipboard.Write(clipboard.FmtText, []byte("\nYanked line"))
 	model.cursor = newCursor(1, 0)
 	pasteAfterBinding.Command(model)
 
