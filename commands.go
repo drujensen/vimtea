@@ -45,6 +45,8 @@ func switchMode(model *editorModel, newMode EditorMode) tea.Cmd {
 		}
 		model.isVisualLine = false
 		model.statusMessage = ""
+		// Clear yank highlight when entering normal mode
+		model.yankHighlight.Active = false
 	case ModeCommand:
 		// Reset command buffer when entering command mode
 		model.commandBuffer = ""

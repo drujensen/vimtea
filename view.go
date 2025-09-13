@@ -21,9 +21,19 @@ func renderTab(col int) string {
 }
 
 // visualLength calculates the visual length of a string, counting tabs as tabWidth spaces
+// and ignoring ANSI escape sequences
 func visualLength(s string, startCol int) int {
 	length := 0
-	for _, r := range s {
+	i := 0
+	for i < len(s) {
+		// Check if we're at an ANSI escape sequence
+		if ansiMatches := ansiRegex.FindStringIndex(s[i:]); ansiMatches != nil && ansiMatches[0] == 0 {
+			// Skip the entire ANSI sequence
+			i += ansiMatches[1]
+			continue
+		}
+
+		r := s[i]
 		if r == '\t' {
 			// Tab advances to the next tab stop
 			spaces := tabWidth - ((startCol + length) % tabWidth)
@@ -31,39 +41,57 @@ func visualLength(s string, startCol int) int {
 		} else {
 			length++
 		}
+		i++
 	}
 	return length
 }
 
 // bufferToVisualPosition converts a buffer position to a visual position
-// This accounts for tabs that visually occupy multiple columns
+// This accounts for tabs that visually occupy multiple columns and ANSI escape sequences
 func bufferToVisualPosition(line string, bufferCol int) int {
 	if bufferCol > len(line) {
 		bufferCol = len(line)
 	}
 
 	visualCol := 0
-	for i, r := range line {
-		if i >= bufferCol {
-			break
+	i := 0
+	for i < bufferCol && i < len(line) {
+		// Check if we're at an ANSI escape sequence
+		if ansiMatches := ansiRegex.FindStringIndex(line[i:]); ansiMatches != nil && ansiMatches[0] == 0 {
+			// Skip the entire ANSI sequence
+			i += ansiMatches[1]
+			continue
 		}
 
+		r := line[i]
 		if r == '\t' {
 			spaces := tabWidth - (visualCol % tabWidth)
 			visualCol += spaces
 		} else {
 			visualCol++
 		}
+		i++
 	}
 	return visualCol
 }
 
 // renderLineWithTabs renders a line with proper tab expansion
+// Preserves ANSI escape sequences
 func renderLineWithTabs(line string) string {
 	var sb strings.Builder
 	visualCol := 0
+	i := 0
 
-	for _, r := range line {
+	for i < len(line) {
+		// Check if we're at an ANSI escape sequence
+		if ansiMatches := ansiRegex.FindStringIndex(line[i:]); ansiMatches != nil && ansiMatches[0] == 0 {
+			// Copy the entire ANSI sequence as-is
+			sb.WriteString(line[i : i+ansiMatches[1]])
+			i += ansiMatches[1]
+			continue
+		}
+
+		r, size := utf8.DecodeRuneInString(line[i:])
 		if r == '\t' {
 			spaces := tabWidth - (visualCol % tabWidth)
 			sb.WriteString(strings.Repeat(" ", spaces))
@@ -72,6 +100,7 @@ func renderLineWithTabs(line string) string {
 			sb.WriteRune(r)
 			visualCol++
 		}
+		i += size
 	}
 
 	return sb.String()
@@ -214,13 +243,19 @@ func abs(n int) int {
 func (m *editorModel) renderRegularCursorLine(line string) string {
 	var sb strings.Builder
 	visualCol := 0
+	bufferIdx := 0
 
 	// Process characters up to the cursor position
-	for i, r := range line {
-		if i >= m.cursor.Col {
-			break
+	for bufferIdx < m.cursor.Col && bufferIdx < len(line) {
+		// Check if we're at an ANSI escape sequence
+		if ansiMatches := ansiRegex.FindStringIndex(line[bufferIdx:]); ansiMatches != nil && ansiMatches[0] == 0 {
+			// Copy the entire ANSI sequence as-is
+			sb.WriteString(line[bufferIdx : bufferIdx+ansiMatches[1]])
+			bufferIdx += ansiMatches[1]
+			continue
 		}
 
+		r, size := utf8.DecodeRuneInString(line[bufferIdx:])
 		if r == '\t' {
 			spaces := tabWidth - (visualCol % tabWidth)
 			sb.WriteString(strings.Repeat(" ", spaces))
@@ -229,43 +264,81 @@ func (m *editorModel) renderRegularCursorLine(line string) string {
 			sb.WriteRune(r)
 			visualCol++
 		}
+		bufferIdx += size
 	}
 
 	// Handle cursor character
 	if m.cursor.Col < len(line) {
-		cursorRune, _ := utf8.DecodeRuneInString(line[m.cursor.Col:])
-		if cursorRune == '\t' {
-			// For tab, just highlight the first space
-			sb.WriteString(m.renderCursor(" "))
-
-			// Write the remaining spaces
-			spaces := tabWidth - 1 - (visualCol % tabWidth)
-			if spaces > 0 {
-				sb.WriteString(strings.Repeat(" ", spaces))
+		// Check if cursor is on an ANSI escape sequence
+		if ansiMatches := ansiRegex.FindStringIndex(line[m.cursor.Col:]); ansiMatches != nil && ansiMatches[0] == 0 {
+			// Cursor is on ANSI sequence, skip it and find the next character
+			ansiEnd := m.cursor.Col + ansiMatches[1]
+			if ansiEnd < len(line) {
+				cursorRune, _ := utf8.DecodeRuneInString(line[ansiEnd:])
+				if cursorRune == '\t' {
+					// For tab, just highlight the first space
+					sb.WriteString(m.renderCursor(" "))
+					// Write the remaining spaces
+					spaces := tabWidth - 1 - (visualCol % tabWidth)
+					if spaces > 0 {
+						sb.WriteString(strings.Repeat(" ", spaces))
+					}
+					visualCol += tabWidth - (visualCol % tabWidth)
+				} else {
+					sb.WriteString(m.renderCursor(string(cursorRune)))
+					visualCol++
+				}
+				bufferIdx = ansiEnd + utf8.RuneLen(cursorRune)
+			} else {
+				// Cursor at end of line after ANSI
+				sb.WriteString(m.renderCursor(" "))
+				visualCol++
+				bufferIdx = len(line)
 			}
-			visualCol += tabWidth - (visualCol % tabWidth)
 		} else {
-			sb.WriteString(m.renderCursor(string(cursorRune)))
-			visualCol++
+			cursorRune, size := utf8.DecodeRuneInString(line[m.cursor.Col:])
+			if cursorRune == '\t' {
+				// For tab, just highlight the first space
+				sb.WriteString(m.renderCursor(" "))
+				// Write the remaining spaces
+				spaces := tabWidth - 1 - (visualCol % tabWidth)
+				if spaces > 0 {
+					sb.WriteString(strings.Repeat(" ", spaces))
+				}
+				visualCol += tabWidth - (visualCol % tabWidth)
+			} else {
+				sb.WriteString(m.renderCursor(string(cursorRune)))
+				visualCol++
+			}
+			bufferIdx = m.cursor.Col + size
 		}
 	} else {
 		// Cursor at end of line
 		sb.WriteString(m.renderCursor(" "))
 		visualCol++
+		bufferIdx = len(line)
 	}
 
 	// Process remaining characters after cursor
-	if m.cursor.Col < len(line)-1 {
-		for _, r := range line[m.cursor.Col+1:] {
-			if r == '\t' {
-				spaces := tabWidth - (visualCol % tabWidth)
-				sb.WriteString(strings.Repeat(" ", spaces))
-				visualCol += spaces
-			} else {
-				sb.WriteRune(r)
-				visualCol++
-			}
+	for bufferIdx < len(line) {
+		// Check if we're at an ANSI escape sequence
+		if ansiMatches := ansiRegex.FindStringIndex(line[bufferIdx:]); ansiMatches != nil && ansiMatches[0] == 0 {
+			// Copy the entire ANSI sequence as-is
+			sb.WriteString(line[bufferIdx : bufferIdx+ansiMatches[1]])
+			bufferIdx += ansiMatches[1]
+			continue
 		}
+
+		r, size := utf8.DecodeRuneInString(line[bufferIdx:])
+		if r == '\t' {
+			spaces := tabWidth - (visualCol % tabWidth)
+			sb.WriteString(strings.Repeat(" ", spaces))
+			visualCol += spaces
+		} else {
+			sb.WriteRune(r)
+			visualCol++
+		}
+		bufferIdx += size
 	}
 
 	return sb.String()
@@ -770,7 +843,34 @@ func (m *editorModel) renderLineInVisualSelectionPlain(line string, rowIdx int, 
 
 func (m editorModel) getVisibleContent() []string {
 	startLine := m.viewport.YOffset
-	endLine := startLine + m.height
+
+	// Estimate how many buffer lines to show based on available height
+	// Account for line wrapping by reducing the number of lines when there are long lines
+	estimatedLines := m.height
+
+	// Check if we have long lines that might wrap
+	totalLines := m.buffer.lineCount()
+	if totalLines > 0 && m.width > 0 {
+		// Sample some lines to estimate average line length
+		sampleSize := min(10, totalLines)
+		totalLength := 0
+		for i := 0; i < sampleSize; i++ {
+			line := m.buffer.Line(i)
+			// Remove ANSI escape codes for length calculation
+			cleanLine := ansiRegex.ReplaceAllString(line, "")
+			totalLength += len(cleanLine)
+		}
+		avgLength := totalLength / sampleSize
+
+		// If average line length is greater than width, reduce the number of lines
+		if avgLength > m.width {
+			// Estimate visual lines per buffer line
+			visualLinesPerBufferLine := (avgLength + m.width - 1) / m.width // Ceiling division
+			estimatedLines = (m.height + visualLinesPerBufferLine - 1) / visualLinesPerBufferLine
+		}
+	}
+
+	endLine := startLine + estimatedLines
 
 	if startLine < 0 {
 		startLine = 0
@@ -782,7 +882,7 @@ func (m editorModel) getVisibleContent() []string {
 		contentLines = append(contentLines, m.buffer.Line(i))
 	}
 
-	emptyLinesNeeded := m.height - len(contentLines)
+	emptyLinesNeeded := estimatedLines - len(contentLines)
 	for range emptyLinesNeeded {
 		contentLines = append(contentLines, "")
 	}
@@ -844,7 +944,8 @@ func (m *editorModel) getYankHighlightBounds(rowIdx int) (int, int) {
 
 func (m *editorModel) renderLineWithYankHighlight(line string, rowIdx int) string {
 	var sb strings.Builder
-	highlightStyle := lipgloss.NewStyle().Background(lipgloss.Color("7"))
+	// Use a more readable highlight color (dark blue background)
+	highlightStyle := lipgloss.NewStyle().Background(lipgloss.Color("4")).Foreground(lipgloss.Color("15"))
 
 	start, end := m.getYankHighlightBounds(rowIdx)
 	if start < 0 || end < 0 {
@@ -856,7 +957,18 @@ func (m *editorModel) renderLineWithYankHighlight(line string, rowIdx int) strin
 
 	// Process the line with proper tab rendering
 	curVisualPos := 0
-	for i, r := range line {
+	i := 0
+	for i < len(line) {
+		// Check if we're at an ANSI escape sequence
+		if ansiMatches := ansiRegex.FindStringIndex(line[i:]); ansiMatches != nil && ansiMatches[0] == 0 {
+			// Copy the entire ANSI sequence as-is
+			sb.WriteString(line[i : i+ansiMatches[1]])
+			i += ansiMatches[1]
+			continue
+		}
+
+		r, size := utf8.DecodeRuneInString(line[i:])
+
 		// Handle character before highlight start
 		if i < start {
 			if r == '\t' {
@@ -867,6 +979,7 @@ func (m *editorModel) renderLineWithYankHighlight(line string, rowIdx int) strin
 				sb.WriteRune(r)
 				curVisualPos++
 			}
+			i += size
 			continue
 		}
 
@@ -896,6 +1009,7 @@ func (m *editorModel) renderLineWithYankHighlight(line string, rowIdx int) strin
 			} else {
 				curVisualPos++
 			}
+			i += size
 			continue
 		}
 
@@ -909,6 +1023,7 @@ func (m *editorModel) renderLineWithYankHighlight(line string, rowIdx int) strin
 				sb.WriteString(highlightStyle.Render(string(r)))
 				curVisualPos++
 			}
+			i += size
 			continue
 		}
 
@@ -921,6 +1036,7 @@ func (m *editorModel) renderLineWithYankHighlight(line string, rowIdx int) strin
 			sb.WriteRune(r)
 			curVisualPos++
 		}
+		i += size
 	}
 
 	return sb.String()
