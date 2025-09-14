@@ -844,30 +844,13 @@ func (m *editorModel) renderLineInVisualSelectionPlain(line string, rowIdx int, 
 func (m editorModel) getVisibleContent() []string {
 	startLine := m.viewport.YOffset
 
-	// Estimate how many buffer lines to show based on available height
-	// Account for line wrapping by reducing the number of lines when there are long lines
+	// Calculate how many buffer lines to show based on available height
+	// Properly account for line wrapping by calculating actual visual lines needed
 	estimatedLines := m.height
 
-	// Check if we have long lines that might wrap
-	totalLines := m.buffer.lineCount()
-	if totalLines > 0 && m.width > 0 {
-		// Sample some lines to estimate average line length
-		sampleSize := min(10, totalLines)
-		totalLength := 0
-		for i := 0; i < sampleSize; i++ {
-			line := m.buffer.Line(i)
-			// Remove ANSI escape codes for length calculation
-			cleanLine := ansiRegex.ReplaceAllString(line, "")
-			totalLength += len(cleanLine)
-		}
-		avgLength := totalLength / sampleSize
-
-		// If average line length is greater than width, reduce the number of lines
-		if avgLength > m.width {
-			// Estimate visual lines per buffer line
-			visualLinesPerBufferLine := (avgLength + m.width - 1) / m.width // Ceiling division
-			estimatedLines = (m.height + visualLinesPerBufferLine - 1) / visualLinesPerBufferLine
-		}
+	// If we have a valid width, calculate exactly how many buffer lines fit
+	if m.width > 0 {
+		estimatedLines = m.calculateBufferLinesForHeight(m.height, startLine)
 	}
 
 	endLine := startLine + estimatedLines
@@ -888,6 +871,54 @@ func (m editorModel) getVisibleContent() []string {
 	}
 
 	return contentLines
+}
+
+// calculateBufferLinesForHeight calculates how many buffer lines can fit in the given height
+// accounting for line wrapping
+func (m editorModel) calculateBufferLinesForHeight(height, startLine int) int {
+	if height <= 0 {
+		return 0
+	}
+
+	totalLines := m.buffer.lineCount()
+	if totalLines == 0 {
+		return height
+	}
+
+	bufferLines := 0
+	visualLinesUsed := 0
+
+	for i := startLine; i < totalLines && visualLinesUsed < height; i++ {
+		line := m.buffer.Line(i)
+		// Remove ANSI escape codes for length calculation
+		cleanLine := ansiRegex.ReplaceAllString(line, "")
+		visualLength := visualLength(cleanLine, 0)
+
+		// Calculate how many visual lines this buffer line takes
+		if visualLength == 0 {
+			// Empty line takes 1 visual line
+			visualLinesUsed++
+		} else {
+			// Calculate wrapped lines: ceiling division of visual length by width
+			wrappedLines := (visualLength + m.width - 1) / m.width
+			visualLinesUsed += wrappedLines
+		}
+
+		// If we've exceeded the height, stop
+		if visualLinesUsed > height {
+			break
+		}
+
+		bufferLines++
+	}
+
+	// If we haven't filled the height, we can show more buffer lines
+	if visualLinesUsed < height {
+		remainingVisualLines := height - visualLinesUsed
+		bufferLines += remainingVisualLines
+	}
+
+	return bufferLines
 }
 
 func (m *editorModel) renderStatusLine() string {
