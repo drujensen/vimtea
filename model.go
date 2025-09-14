@@ -357,7 +357,40 @@ func (m *editorModel) handleKeypress(msg tea.KeyMsg) (tea.Model, tea.Cmd) {
 		}
 
 	case ModeVisual:
-		// Visual mode also uses key sequence handling
+		// Check for registered keybindings first (like escape to exit visual mode)
+		keyStr := msg.String()
+		// Handle special keys that might not have the expected string representation
+		switch msg.Type {
+		case tea.KeyEsc:
+			keyStr = "esc"
+		case tea.KeyLeft:
+			keyStr = "left"
+		case tea.KeyRight:
+			keyStr = "right"
+		case tea.KeyUp:
+			keyStr = "up"
+		case tea.KeyDown:
+			keyStr = "down"
+		case tea.KeyEnter:
+			keyStr = "enter"
+		case tea.KeyBackspace:
+			keyStr = "backspace"
+		case tea.KeyTab:
+			keyStr = "tab"
+		// Handle Ctrl+key combinations
+		case tea.KeyCtrlC:
+			keyStr = "ctrl+c"
+		case tea.KeyCtrlR:
+			keyStr = "ctrl+r"
+		case tea.KeyCtrlT:
+			keyStr = "ctrl+t"
+		}
+		if binding := m.registry.FindExact(keyStr, ModeVisual); binding != nil {
+			cmd := binding.Command(m)
+			m.ensureCursorVisible()
+			return m, cmd
+		}
+		// Visual mode uses key sequence handling for multi-key commands
 		return m.handlePrefixKeypress(ModeVisual)(msg)
 
 	case ModeCommand:

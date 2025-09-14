@@ -542,9 +542,11 @@ func deleteCharAtCursor(model *editorModel) tea.Cmd {
 }
 
 func setupYankHighlight(model *editorModel, start, end Cursor, text string, isLinewise bool) {
-	model.yankBuffer = text
+	// Strip ANSI escape sequences from the text for clean copying
+	cleanText := ansiRegex.ReplaceAllString(text, "")
+	model.yankBuffer = cleanText
 	clipboard.Write(clipboard.FmtText, []byte(model.yankBuffer))
-	model.statusMessage = fmt.Sprintf("yanked %d characters", len(text))
+	model.statusMessage = fmt.Sprintf("yanked %d characters", len(cleanText))
 	model.yankHighlight.Start = start
 	model.yankHighlight.End = end
 	model.yankHighlight.StartTime = time.Now()
