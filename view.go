@@ -138,7 +138,9 @@ func (m *editorModel) renderContent() string {
 		lineNum := i + m.viewport.YOffset + 1
 		rowIdx := lineNum - 1
 
-		sb.WriteString(m.renderLineNumber(lineNum, rowIdx))
+		if m.showLineNumbers {
+			sb.WriteString(m.renderLineNumber(lineNum, rowIdx))
+		}
 
 		if rowIdx >= m.buffer.lineCount() {
 			sb.WriteString("\n")
@@ -157,7 +159,10 @@ func (m *editorModel) renderLine(line string, rowIdx int, inVisualSelection bool
 	displayLine := renderLineWithTabs(line)
 
 	if m.mode == ModeVisual && m.isVisualLine && inVisualSelection {
-		return m.selectedStyle.Render(displayLine)
+		// Strip ANSI characters for clean visual line selection
+		cleanLine := ansiRegex.ReplaceAllString(line, "")
+		cleanDisplayLine := renderLineWithTabs(cleanLine)
+		return m.selectedStyle.Render(cleanDisplayLine)
 	}
 
 	if m.mode != ModeVisual && m.yankHighlight.Active && m.isLineInYankHighlight(rowIdx) {
@@ -202,6 +207,11 @@ func (m *editorModel) renderLine(line string, rowIdx int, inVisualSelection bool
 }
 
 func (m *editorModel) renderCursor(char string) string {
+	// Hide cursor when editor is not focused
+	if !m.focused {
+		return char
+	}
+
 	if !m.cursorBlink {
 		return char
 	}
@@ -217,6 +227,10 @@ func (m *editorModel) renderCursor(char string) string {
 }
 
 func (m *editorModel) renderLineNumber(lineNum int, rowIdx int) string {
+	if !m.showLineNumbers {
+		return ""
+	}
+
 	if rowIdx >= m.buffer.lineCount() {
 		return m.lineNumberStyle.Render("    ")
 	}
@@ -447,9 +461,91 @@ func (m *editorModel) renderSyntaxHighlightedCursorLine(highlightedLine, plainLi
 }
 
 func (m *editorModel) renderLineWithCursorInVisualSelection(line string, rowIdx int, selStart, selEnd Cursor) string {
-	// For visual mode, use plain text rendering to avoid ANSI character distortion
-	// This ensures clean visual selection without syntax highlighting artifacts
-	return m.renderLineWithCursorInVisualSelectionPlain(line, rowIdx, selStart, selEnd)
+	// In visual mode, strip ANSI characters to avoid conflicts and show clean selection
+	// This matches what gets yanked (no ANSI characters)
+	cleanLine := ansiRegex.ReplaceAllString(line, "")
+
+	// Use plain rendering with clean text
+	return m.renderLineWithCursorInVisualSelectionPlain(cleanLine, rowIdx, selStart, selEnd)
+}
+
+func (m *editorModel) renderLineWithCursorInVisualSelectionHighlighted(highlightedLine string, plainLine string, rowIdx int, selStart Cursor, selEnd Cursor) string {
+	// Get selection boundaries in buffer coordinates
+	selBegin := 0
+	if rowIdx == selStart.Row {
+		selBegin = selStart.Col
+	}
+
+	selEndCol := len(plainLine)
+	if rowIdx == selEnd.Row {
+		selEndCol = selEnd.Col + 1
+	}
+
+	// Convert buffer positions to visual positions for highlighted text
+	visSelBegin := bufferToVisualPosition(plainLine, selBegin)
+	visSelEnd := bufferToVisualPosition(plainLine, selEndCol)
+	visCursorPos := bufferToVisualPosition(plainLine, m.cursor.Col)
+
+	// Extract ANSI escape sequences from highlighted text
+	ansiMatches := ansiRegex.FindAllStringIndex(highlightedLine, -1)
+
+	// Build the result with proper selection highlighting
+	var sb strings.Builder
+	visPos := 0
+	inSelection := false
+
+	for i := 0; i < len(highlightedLine); {
+		// Check if we're at an ANSI sequence
+		isAnsi := false
+		for _, match := range ansiMatches {
+			if match[0] == i {
+				// Copy ANSI sequence as-is
+				sb.WriteString(highlightedLine[match[0]:match[1]])
+				i = match[1]
+				isAnsi = true
+				break
+			}
+		}
+
+		if isAnsi {
+			continue
+		}
+
+		// Update selection state
+		if visPos == visSelBegin {
+			inSelection = true
+		}
+		if visPos == visSelEnd {
+			inSelection = false
+		}
+
+		char := highlightedLine[i]
+
+		// Handle cursor position
+		if visPos == visCursorPos {
+			if inSelection {
+				// Cursor in selection - use selected style
+				sb.WriteString("\x1b[0m") // Reset any existing styles
+				sb.WriteString(m.selectedStyle.Render(string(char)))
+			} else {
+				// Cursor not in selection - use cursor style
+				sb.WriteString("\x1b[0m") // Reset any existing styles
+				sb.WriteString(m.renderCursor(string(char)))
+			}
+		} else if inSelection {
+			// Character in selection but not cursor
+			sb.WriteString("\x1b[0m") // Reset any existing styles
+			sb.WriteString(m.selectedStyle.Render(string(char)))
+		} else {
+			// Regular character with syntax highlighting
+			sb.WriteString(string(char))
+		}
+
+		visPos++
+		i++
+	}
+
+	return sb.String()
 }
 
 // renderLineWithCursorInVisualSelectionPlain handles rendering a line with a cursor in visual selection
@@ -541,9 +637,12 @@ func (m *editorModel) renderLineWithCursorInVisualSelectionPlain(line string, ro
 }
 
 func (m *editorModel) renderLineInVisualSelection(line string, rowIdx int, selStart, selEnd Cursor) string {
-	// For visual mode, use plain text rendering to avoid ANSI character distortion
-	// This ensures clean visual selection without syntax highlighting artifacts
-	return m.renderLineInVisualSelectionPlain(line, rowIdx, selStart, selEnd)
+	// In visual mode, strip ANSI characters to avoid conflicts and show clean selection
+	// This matches what gets yanked (no ANSI characters)
+	cleanLine := ansiRegex.ReplaceAllString(line, "")
+
+	// Use plain rendering with clean text
+	return m.renderLineInVisualSelectionPlain(cleanLine, rowIdx, selStart, selEnd)
 }
 
 // renderLineInVisualSelectionPlain handles rendering a line in visual selection
@@ -744,25 +843,21 @@ func (m *editorModel) renderLineWithYankHighlight(line string, rowIdx int) strin
 
 	start, end := m.getYankHighlightBounds(rowIdx)
 	if start < 0 || end < 0 {
-		return renderLineWithTabs(line)
+		// Strip ANSI characters for clean display
+		cleanLine := ansiRegex.ReplaceAllString(line, "")
+		return renderLineWithTabs(cleanLine)
 	}
 
-	start = max(0, min(start, len(line)))
-	end = max(0, min(end, len(line)))
+	// Strip ANSI characters for consistent highlighting
+	cleanLine := ansiRegex.ReplaceAllString(line, "")
+	start = max(0, min(start, len(cleanLine)))
+	end = max(0, min(end, len(cleanLine)))
 
-	// Process the line with proper tab rendering
+	// Process the clean line with proper tab rendering
 	curVisualPos := 0
 	i := 0
-	for i < len(line) {
-		// Check if we're at an ANSI escape sequence
-		if ansiMatches := ansiRegex.FindStringIndex(line[i:]); ansiMatches != nil && ansiMatches[0] == 0 {
-			// Copy the entire ANSI sequence as-is
-			sb.WriteString(line[i : i+ansiMatches[1]])
-			i += ansiMatches[1]
-			continue
-		}
-
-		r, size := utf8.DecodeRuneInString(line[i:])
+	for i < len(cleanLine) {
+		r, size := utf8.DecodeRuneInString(cleanLine[i:])
 
 		// Handle character before highlight start
 		if i < start {

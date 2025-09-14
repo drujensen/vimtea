@@ -142,6 +142,7 @@ func registerBindings(m *editorModel) {
 	m.registry.Add("backspace", commandBackspace, ModeCommand, "Backspace")
 
 	m.commands.Register("zr", toggleRelativeLineNumbers)
+	m.commands.Register("zn", toggleLineNumbers)
 	m.commands.Register("clear", clearBuffer)
 	m.commands.Register("reset", resetEditor)
 }
@@ -152,6 +153,15 @@ func toggleRelativeLineNumbers(model *editorModel) tea.Cmd {
 		return SetStatusMsg("relative line numbers: on")
 	} else {
 		return SetStatusMsg("relative line numbers: off")
+	}
+}
+
+func toggleLineNumbers(model *editorModel) tea.Cmd {
+	model.showLineNumbers = !model.showLineNumbers
+	if model.showLineNumbers {
+		return SetStatusMsg("line numbers: on")
+	} else {
+		return SetStatusMsg("line numbers: off")
 	}
 }
 

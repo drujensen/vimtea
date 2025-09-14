@@ -73,6 +73,16 @@ type Editor interface {
 
 	// Reset restores the editor to its initial state
 	Reset() tea.Cmd
+
+	// SetAutoScroll enables or disables automatic scrolling to the bottom
+	// when new content is added to the buffer
+	SetAutoScroll(enabled bool)
+
+	// ScrollToBottom scrolls the viewport to show the bottom of the content
+	ScrollToBottom()
+
+	// SetFocus sets whether the editor is currently focused
+	SetFocus(focused bool)
 }
 
 // editorModel implements the Editor interface and maintains the editor state
@@ -97,6 +107,7 @@ type editorModel struct {
 	countPrefix int // Numeric prefix for commands like "10j"
 
 	relativeNumbers bool // Whether to show relative line numbers
+	showLineNumbers bool // Whether to show line numbers
 
 	viewport        viewport.Model // For scrolling
 	width           int            // Window width
@@ -106,6 +117,9 @@ type editorModel struct {
 	lastBlinkTime   time.Time      // Time of last cursor blink
 	blinkInterval   time.Duration  // Cursor blink interval
 	enableStatusBar bool           // Whether to show the status bar
+	autoScroll      bool           // Whether to automatically scroll to bottom on content changes
+	firstSizeSet    bool           // Whether SetSize has been called for the first time
+	focused         bool           // Whether the editor is currently focused
 
 	lineNumberStyle        lipgloss.Style
 	currentLineNumberStyle lipgloss.Style
@@ -139,6 +153,7 @@ type options struct {
 	SelectedStyle          lipgloss.Style // Style for selected text
 	FileName               string         // Filename for syntax highlighting
 	RelativeNumbers        bool           // Whether to show relative line numbers
+	ShowLineNumbers        bool           // Whether to show line numbers
 	FullScreen             bool           // Whether to use the full terminal screen
 	ReadOnly               bool           // Whether the editor is read-only
 }
@@ -163,6 +178,7 @@ func NewEditor(opts ...EditorOption) Editor {
 		SelectedStyle:          selectedStyle,
 		FileName:               "",
 		RelativeNumbers:        false,
+		ShowLineNumbers:        true,
 		FullScreen:             false,
 		ReadOnly:               false,
 	}
@@ -195,7 +211,11 @@ func NewEditor(opts ...EditorOption) Editor {
 		commandStyle:           options.CommandStyle,
 		selectedStyle:          options.SelectedStyle,
 		relativeNumbers:        options.RelativeNumbers,
+		showLineNumbers:        options.ShowLineNumbers,
 		countPrefix:            1,
+		autoScroll:             false,
+		firstSizeSet:           false,
+		focused:                true,
 
 		highlighter:    newSyntaxHighlighter(options.DefaultSyntaxTheme, options.FileName),
 		yankHighlight:  newYankHighlight(),
@@ -236,17 +256,19 @@ func (m *editorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 
 	switch msg := msg.(type) {
 	case tea.KeyMsg:
-		// Reset cursor blink on keypress
-		m.cursorBlink = true
-		m.lastBlinkTime = time.Now()
+		// Reset cursor blink on keypress (only when focused)
+		if m.focused {
+			m.cursorBlink = true
+			m.lastBlinkTime = time.Now()
+		}
 		return m.handleKeypress(msg)
 	case tea.WindowSizeMsg:
 		return m.SetSize(msg.Width, msg.Height)
 
 	case cursorBlinkMsg:
-		// Handle cursor blinking animation
+		// Handle cursor blinking animation (only when focused)
 		now := time.Time(msg)
-		if now.Sub(m.lastBlinkTime) >= m.blinkInterval {
+		if m.focused && now.Sub(m.lastBlinkTime) >= m.blinkInterval {
 			m.cursorBlink = !m.cursorBlink
 			m.lastBlinkTime = now
 		}
@@ -331,6 +353,21 @@ func (m *editorModel) SetSize(width, height int) (tea.Model, tea.Cmd) {
 
 	// Ensure cursor is visible after resize
 	m.ensureCursorVisible()
+
+	// On first size set with content, scroll to bottom for better UX
+	if !m.firstSizeSet && m.buffer.lineCount() > 0 {
+		m.scrollToBottom()
+		m.firstSizeSet = true
+	}
+
+	// If auto-scroll is enabled, scroll to bottom after resize
+	if m.autoScroll {
+		m.scrollToBottom()
+	}
+
+	// Ensure cursor is visible after any scrolling operations
+	m.ensureCursorVisible()
+
 	return m, nil
 }
 
@@ -600,6 +637,51 @@ func SetStatusMsg(msg string) tea.Cmd {
 	}
 }
 
+// SetAutoScroll enables or disables automatic scrolling to the bottom
+// when new content is added to the buffer
+func (m *editorModel) SetAutoScroll(enabled bool) {
+	m.autoScroll = enabled
+	if enabled {
+		// When enabling auto-scroll, immediately scroll to bottom
+		m.scrollToBottom()
+	}
+}
+
+// ScrollToBottom scrolls the viewport to show the bottom of the content
+func (m *editorModel) ScrollToBottom() {
+	m.scrollToBottom()
+}
+
+// SetFocus sets whether the editor is currently focused
+func (m *editorModel) SetFocus(focused bool) {
+	m.focused = focused
+	// Reset cursor blink state when focus changes
+	if focused {
+		m.cursorBlink = true
+		m.lastBlinkTime = time.Now()
+	}
+}
+
+// scrollToBottom scrolls the viewport to show the bottom of the content
+func (m *editorModel) scrollToBottom() {
+	totalLines := m.buffer.lineCount()
+	if totalLines > m.height {
+		m.viewport.YOffset = totalLines - m.height
+	} else {
+		m.viewport.YOffset = 0
+	}
+
+	// Move cursor to the bottom (end of last line)
+	if totalLines > 0 {
+		lastLineIndex := totalLines - 1
+		lastLineLength := m.buffer.lineLength(lastLineIndex)
+		m.cursor.Row = lastLineIndex
+		m.cursor.Col = lastLineLength
+		// Adjust cursor position based on mode (normal mode can't be at end of line)
+		m.adjustCursorPosition()
+	}
+}
+
 // Reset restores the editor to its initial state
 func (m *editorModel) Reset() tea.Cmd {
 	// Save current state for undo if needed
@@ -729,6 +811,13 @@ func WithFileName(fileName string) EditorOption {
 func WithRelativeNumbers(enable bool) EditorOption {
 	return func(o *options) {
 		o.RelativeNumbers = enable
+	}
+}
+
+// WithShowLineNumbers enables or disables line number display
+func WithShowLineNumbers(show bool) EditorOption {
+	return func(o *options) {
+		o.ShowLineNumbers = show
 	}
 }
 

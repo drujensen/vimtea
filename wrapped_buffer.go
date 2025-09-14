@@ -40,6 +40,11 @@ func (w *wrappedBuffer) VisualLineLength(row int) int {
 func (w *wrappedBuffer) InsertAt(row int, col int, text string) {
 	w.m.buffer.saveUndoState(w.m.cursor)
 	w.m.buffer.insertAt(row, col, text)
+
+	// Auto-scroll to bottom if enabled
+	if w.m.autoScroll {
+		w.m.scrollToBottom()
+	}
 }
 
 // DeleteAt deletes text between the specified positions
