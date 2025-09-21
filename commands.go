@@ -47,9 +47,13 @@ func switchMode(model *editorModel, newMode EditorMode) tea.Cmd {
 		model.statusMessage = ""
 		// Clear yank highlight when entering normal mode
 		model.yankHighlight.Active = false
+		// End drag operation when entering normal mode
+		model.isDragging = false
 	case ModeCommand:
 		// Reset command buffer when entering command mode
 		model.commandBuffer = ""
+		// End drag operation when entering command mode
+		model.isDragging = false
 	}
 
 	return func() tea.Msg {

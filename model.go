@@ -121,6 +121,9 @@ type editorModel struct {
 	firstSizeSet    bool           // Whether SetSize has been called for the first time
 	focused         bool           // Whether the editor is currently focused
 
+	isDragging      bool            // Whether we're currently in a drag operation
+	lastButtonState tea.MouseButton // Last known button state
+
 	lineNumberStyle        lipgloss.Style
 	currentLineNumberStyle lipgloss.Style
 	textStyle              lipgloss.Style
@@ -216,6 +219,8 @@ func NewEditor(opts ...EditorOption) Editor {
 		autoScroll:             false,
 		firstSizeSet:           false,
 		focused:                true,
+		isDragging:             false,
+		lastButtonState:        tea.MouseButtonNone,
 
 		highlighter:    newSyntaxHighlighter(options.DefaultSyntaxTheme, options.FileName),
 		yankHighlight:  newYankHighlight(),
@@ -262,6 +267,8 @@ func (m *editorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 			m.lastBlinkTime = time.Now()
 		}
 		return m.handleKeypress(msg)
+	case tea.MouseMsg:
+		return m.handleMouseEvent(msg)
 	case tea.WindowSizeMsg:
 		return m.SetSize(msg.Width, msg.Height)
 
@@ -304,6 +311,11 @@ func (m *editorModel) Update(msg tea.Msg) (tea.Model, tea.Cmd) {
 		}
 		m.commandBuffer = ""
 		m.mode = ModeNormal
+
+	case dragScrollMsg:
+		// Continue scrolling during drag operations
+		return m, m.handleDragScrolling(0) // mouseY doesn't matter for continuation
+
 	}
 
 	return m, cmd
@@ -564,6 +576,146 @@ func (m *editorModel) handlePrefixKeypress(mode EditorMode) func(msg tea.KeyMsg)
 	}
 }
 
+// handleMouseEvent processes mouse events for the editor
+func (m *editorModel) handleMouseEvent(msg tea.MouseMsg) (tea.Model, tea.Cmd) {
+	var cmd tea.Cmd
+	// Convert mouse coordinates to buffer coordinates
+	bufferRow, bufferCol := m.mouseToBufferPosition(msg.X, msg.Y)
+
+	// Check for button release (button was held before but not now)
+	buttonReleased := m.lastButtonState != tea.MouseButtonNone && msg.Button == tea.MouseButtonNone && m.isDragging
+
+	// Update last button state
+	m.lastButtonState = msg.Button
+
+	switch msg.Type {
+	case tea.MouseLeft:
+		// Left click - focus the editor, move cursor, and start visual selection
+		m.SetFocus(true)
+		m.moveCursorToPosition(bufferRow, bufferCol)
+		// Enter visual mode immediately for selection
+		if m.mode != ModeVisual {
+			m.SetMode(ModeVisual)
+		}
+		// Start drag tracking
+		m.isDragging = true
+		return m, nil
+
+	case tea.MouseMotion:
+		// Check if button was just released
+		if buttonReleased {
+			// Button released - yank selection and exit visual mode
+			if m.mode == ModeVisual {
+				cmd = yankVisualSelection(m)
+			}
+			m.isDragging = false
+			return m, cmd
+		}
+
+		// Mouse motion - handle drag selection
+		if m.isDragging && msg.Button != tea.MouseButtonNone {
+			// Button is still held - update selection
+			if m.mode != ModeVisual {
+				m.SetMode(ModeVisual)
+			}
+			// Handle scrolling when dragging beyond visible area
+			cmd = m.handleDragScrolling(msg.Y)
+			// Update visual selection end
+			m.moveCursorToPosition(bufferRow, bufferCol)
+			return m, cmd
+		}
+
+	}
+
+	return m, nil
+}
+
+// mouseToBufferPosition converts screen coordinates to buffer coordinates
+func (m *editorModel) mouseToBufferPosition(screenX, screenY int) (int, int) {
+	// Account for line numbers
+	lineNumOffset := 0
+	if m.showLineNumbers {
+		lineNumOffset = 4 // 4 characters for line numbers
+	}
+
+	// Calculate buffer row (accounting for viewport offset)
+	bufferRow := screenY + m.viewport.YOffset
+
+	// Ensure row is within bounds
+	if bufferRow < 0 {
+		bufferRow = 0
+	}
+	if bufferRow >= m.buffer.lineCount() {
+		bufferRow = m.buffer.lineCount() - 1
+		if bufferRow < 0 {
+			bufferRow = 0
+		}
+	}
+
+	// Calculate buffer column
+	bufferCol := screenX - lineNumOffset
+	if bufferCol < 0 {
+		bufferCol = 0
+	}
+
+	// Ensure column is within line bounds
+	lineLength := m.buffer.lineLength(bufferRow)
+	if bufferCol >= lineLength {
+		bufferCol = lineLength
+	}
+
+	return bufferRow, bufferCol
+}
+
+// moveCursorToPosition moves the cursor to the specified buffer position
+func (m *editorModel) moveCursorToPosition(row, col int) {
+	m.cursor.Row = row
+	m.cursor.Col = col
+	m.desiredCol = col
+	m.ensureCursorVisible()
+}
+
+// handleDragScrolling handles automatic scrolling when dragging beyond visible area
+func (m *editorModel) handleDragScrolling(mouseY int) tea.Cmd {
+	visibleHeight := m.height
+	if m.enableStatusBar {
+		visibleHeight -= 2
+	}
+
+	// Check if mouse is above visible area (within first 2 lines)
+	if mouseY <= 1 {
+		if m.viewport.YOffset > 0 {
+			m.viewport.YOffset--
+			return tea.Tick(50*time.Millisecond, func(t time.Time) tea.Msg {
+				return dragScrollMsg{direction: -1}
+			})
+		}
+	}
+
+	// Check if mouse is below visible area (within last 2 lines)
+	if mouseY >= visibleHeight-2 {
+		totalLines := m.buffer.lineCount()
+		maxOffset := totalLines - visibleHeight
+		if maxOffset < 0 {
+			maxOffset = 0
+		}
+
+		if m.viewport.YOffset < maxOffset {
+			m.viewport.YOffset++
+			return tea.Tick(50*time.Millisecond, func(t time.Time) tea.Msg {
+				return dragScrollMsg{direction: 1}
+			})
+		}
+	}
+
+	return nil
+}
+
+// dragScrollMsg is sent when automatic scrolling during drag operations
+type dragScrollMsg struct {
+	direction int // -1 for up, 1 for down
+}
+
 // GetBuffer returns a wrapped buffer that provides the Buffer interface
 func (m *editorModel) GetBuffer() Buffer {
 	return &wrappedBuffer{m}
@@ -659,6 +811,9 @@ func (m *editorModel) SetFocus(focused bool) {
 	if focused {
 		m.cursorBlink = true
 		m.lastBlinkTime = time.Now()
+	} else {
+		// End drag operation when focus is lost
+		m.isDragging = false
 	}
 }
 

@@ -61,7 +61,7 @@ func main() {
 		return tea.Quit
 	})
 
-	p := tea.NewProgram(editor, tea.WithAltScreen())
+	p := tea.NewProgram(editor, tea.WithAltScreen(), tea.WithMouseAllMotion())
 	if _, err := p.Run(); err != nil {
 		log.Printf("Error running program: %v", err)
 	}
