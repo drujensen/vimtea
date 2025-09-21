@@ -207,11 +207,6 @@ func (m *editorModel) renderLine(line string, rowIdx int, inVisualSelection bool
 }
 
 func (m *editorModel) renderCursor(char string) string {
-	// Hide cursor when editor is not focused
-	if !m.focused {
-		return char
-	}
-
 	if !m.cursorBlink {
 		return char
 	}
@@ -705,19 +700,27 @@ func (m *editorModel) renderLineInVisualSelectionPlain(line string, rowIdx int, 
 }
 
 func (m editorModel) getVisibleContent() []string {
+	borderWidth := 4
+	borderHeight := -1
+
+	// Calculate the usable area by subtracting the border sizes
+	usableWidth := m.viewport.Width - borderWidth
+	usableHeight := m.viewport.Height - borderHeight
+
+	// Adjust Y-axis for scrolling and visibility
 	startLine := m.viewport.YOffset
 
 	// Calculate how many buffer lines to show based on available height
-	// Properly account for line wrapping by calculating actual visual lines needed
-	estimatedLines := m.height
+	estimatedLines := usableHeight
 
-	// If we have a valid width, calculate exactly how many buffer lines fit
-	if m.width > 0 {
-		estimatedLines = m.calculateBufferLinesForHeight(m.height, startLine)
+	// If we have a valid usable width, calculate exactly how many buffer lines fit
+	if usableWidth > 0 {
+		estimatedLines = m.calculateBufferLinesForHeight(usableHeight, startLine)
 	}
 
 	endLine := startLine + estimatedLines
 
+	// Ensure that we do not go out of bounds
 	if startLine < 0 {
 		startLine = 0
 	}
@@ -728,8 +731,9 @@ func (m editorModel) getVisibleContent() []string {
 		contentLines = append(contentLines, m.buffer.Line(i))
 	}
 
+	// Fill in any remaining lines if necessary
 	emptyLinesNeeded := estimatedLines - len(contentLines)
-	for range emptyLinesNeeded {
+	for range make([]struct{}, emptyLinesNeeded) {
 		contentLines = append(contentLines, "")
 	}
 
