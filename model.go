@@ -653,7 +653,7 @@ func (m *editorModel) mouseToBufferPosition(screenX, screenY int) (int, int) {
 	}
 
 	// Calculate buffer column
-	bufferCol := screenX - lineNumOffset
+	bufferCol := screenX - lineNumOffset - 1 // Adjust for mouse click positioning
 	if bufferCol < 0 {
 		bufferCol = 0
 	}

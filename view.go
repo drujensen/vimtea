@@ -701,7 +701,7 @@ func (m *editorModel) renderLineInVisualSelectionPlain(line string, rowIdx int, 
 
 func (m editorModel) getVisibleContent() []string {
 	borderWidth := 4
-	borderHeight := -1
+	borderHeight := 0
 
 	// Calculate the usable area by subtracting the border sizes
 	usableWidth := m.viewport.Width - borderWidth
