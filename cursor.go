@@ -19,13 +19,46 @@ func newCursor(row, col int) Cursor {
 
 // ensureCursorVisible scrolls the viewport to make sure the cursor is visible
 // This is called whenever the cursor moves or the window is resized
+// Note: This assumes 1 buffer line = 1 visual line. For wrapped lines, the viewport
+// may need to scroll more aggressively to keep the cursor visible.
 func (m *editorModel) ensureCursorVisible() {
+	// Get usable width for calculating wrapped lines
+	usableWidth := m.width
+	if m.showLineNumbers {
+		usableWidth -= 4 // Line numbers take 4 characters
+	}
+
+	// Calculate the visual position of the cursor (accounting for wrapped lines above it)
+	cursorVisualRow := 0
+	for i := 0; i < m.cursor.Row && i < m.buffer.lineCount(); i++ {
+		line := m.buffer.Line(i)
+		cleanLine := ansiRegex.ReplaceAllString(line, "")
+		lineVisualLength := visualLength(cleanLine, 0)
+
+		if lineVisualLength == 0 {
+			cursorVisualRow++
+		} else {
+			wrappedLines := (lineVisualLength + usableWidth - 1) / usableWidth
+			cursorVisualRow += wrappedLines
+		}
+	}
+
+	// Calculate cursor's visual row within its own line (accounting for wrapping)
+	if m.cursor.Row < m.buffer.lineCount() {
+		line := m.buffer.Line(m.cursor.Row)
+		cleanLine := ansiRegex.ReplaceAllString(line, "")
+		// Calculate visual column position within the line
+		visualCol := bufferToVisualPosition(cleanLine, m.cursor.Col)
+		// Add the wrapped lines within the current line up to the cursor position
+		cursorVisualRow += visualCol / usableWidth
+	}
+
 	// If cursor is above the viewport, scroll up
-	if m.cursor.Row < m.viewport.YOffset {
-		m.viewport.YOffset = m.cursor.Row
-	} else if m.cursor.Row >= m.viewport.YOffset+m.height {
+	if cursorVisualRow < m.viewport.YOffset {
+		m.viewport.YOffset = cursorVisualRow
+	} else if cursorVisualRow >= m.viewport.YOffset+m.height {
 		// If cursor is below the viewport, scroll down
-		m.viewport.YOffset = m.cursor.Row - m.height + 1
+		m.viewport.YOffset = cursorVisualRow - m.height + 1
 	}
 
 	// Ensure cursor is within valid bounds
