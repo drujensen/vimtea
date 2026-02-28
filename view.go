@@ -37,7 +37,13 @@ func visualLength(s string, startCol int) int {
 		if r == '\t' {
 			// Tab advances to the next tab stop
 			spaces := tabWidth - ((startCol + length) % tabWidth)
-			length += spaces
+			// Ensure we don't go backwards
+			if spaces > 0 {
+				length += spaces
+			} else {
+				// If tab would go backwards (which shouldn't happen), add one space
+				length++
+			}
 		} else {
 			length++
 		}
@@ -771,6 +777,10 @@ func (m editorModel) calculateBufferLinesForHeight(height, startLine, usableWidt
 			visualLinesUsed++
 		} else {
 			// Calculate wrapped lines: ceiling division of visual length by usableWidth
+			// Handle the case where usableWidth is 0 or negative
+			if usableWidth <= 0 {
+				usableWidth = 1
+			}
 			wrappedLines := (lineVisualLength + usableWidth - 1) / usableWidth
 			visualLinesUsed += wrappedLines
 		}

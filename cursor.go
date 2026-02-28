@@ -28,6 +28,11 @@ func (m *editorModel) ensureCursorVisible() {
 		usableWidth -= 4 // Line numbers take 4 characters
 	}
 
+	// Handle edge case where usableWidth might be invalid
+	if usableWidth <= 0 {
+		usableWidth = 1
+	}
+
 	// Calculate the visual position of the cursor (accounting for wrapped lines above it)
 	cursorVisualRow := 0
 	for i := 0; i < m.cursor.Row && i < m.buffer.lineCount(); i++ {
@@ -58,7 +63,12 @@ func (m *editorModel) ensureCursorVisible() {
 		m.viewport.YOffset = cursorVisualRow
 	} else if cursorVisualRow >= m.viewport.YOffset+m.height {
 		// If cursor is below the viewport, scroll down
-		m.viewport.YOffset = cursorVisualRow - m.height + 1
+		// Ensure we don't scroll too far
+		maxOffset := cursorVisualRow - m.height + 1
+		if maxOffset < 0 {
+			maxOffset = 0
+		}
+		m.viewport.YOffset = maxOffset
 	}
 
 	// Ensure cursor is within valid bounds
